@@ -46,8 +46,19 @@ class PowerManager {
   // normal init path. Display RESET is held LOW when its rail is cut (avoids
   // back-powering an unpowered controller) and HIGH when its rail remains on
   // (keeps deep-sleep state stable). NOTE: cutting the touch rail forfeits
-  // touch-to-wake.
+  // touch-to-wake. A rail-enable pin that is also a power latch is skipped: on
+  // the Xteink X3/X4 the "SD enable" (GPIO13) is the battery MOSFET gate, so
+  // cutting it here would power the board off rather than gate a peripheral.
+  // Releasing a latch is the caller's decision — see holdPowerRailsForTimerWake().
   static void powerDownRailsForSleep();
+
+  // Drive the active board's power-latch pins to their asserted (HIGH) level and
+  // hold them through deep sleep. A timer wake only happens if the board is still
+  // powered when the timer fires, so any sleep that arms one must call this: on a
+  // battery-latched board an unheld latch pin floats once the GPIOs are isolated,
+  // the latch node discharges, and the device switches off instead of sleeping.
+  // USB masks this entirely, because VBUS feeds the same latch node in parallel.
+  static void holdPowerRailsForTimerWake();
 
   // Isolate floating GPIOs to cut sleep current, then enter deep sleep. Does not
   // return — the chip resets on wake.
