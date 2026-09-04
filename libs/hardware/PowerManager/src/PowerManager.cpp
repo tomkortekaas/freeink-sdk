@@ -60,13 +60,27 @@ namespace {
 // Drive a rail-enable pin to `offLevel` and latch it so the level survives deep
 // sleep (requires gpio_deep_sleep_hold_en(), done in deepSleep()). gpio_hold_dis
 // first: a hold left over from a previous cycle would make the writes no-ops.
-void holdRailOff(int8_t pin, uint8_t offLevel) {
+void holdRail(int8_t pin, uint8_t level) {
   if (pin < 0) return;
   const auto g = static_cast<gpio_num_t>(pin);
   gpio_hold_dis(g);
   pinMode(pin, OUTPUT);
-  digitalWrite(pin, offLevel);
+  digitalWrite(pin, level);
   gpio_hold_en(g);
+}
+
+// True when a rail-enable pin doubles as a power latch. Cutting such a pin does
+// not gate a peripheral, it powers the board off (Xteink X3/X4: GPIO13 is both).
+bool pinIsPowerLatch(int8_t pin) {
+  if (pin < 0) return false;
+  const auto& p = BoardConfig::ACTIVE.power;
+  return pin == p.latch0 || pin == p.latch1;
+}
+
+// Cut a peripheral rail, unless the pin is really the board's power latch.
+void holdPeripheralRailOff(int8_t pin, uint8_t offLevel) {
+  if (pinIsPowerLatch(pin)) return;
+  holdRail(pin, offLevel);
 }
 }  // namespace
 
@@ -80,15 +94,24 @@ void PowerManager::powerDownRailsForSleep() {
   // not stay collapsed, so its analog restarts and drains the pack through "off"
   // (field report: dead in ~36 h). Holding RST high is the controller's normal
   // idle level, so it's harmless for the SSD1677 batch. Released on wake in
-  // EpdBus::begin() before the reset pulse. (holdRailOff no-ops if RST unassigned.)
-  holdRailOff(b.display.rst, HIGH);
-  holdRailOff(b.display.powerEnable, LOW);
+  // EpdBus::begin() before the reset pulse. (holdRail no-ops if RST unassigned.)
+  holdRail(b.display.rst, HIGH);
+  holdPeripheralRailOff(b.display.powerEnable, LOW);
   // SD enable OFF = the inactive level: LOW for active-high enables, HIGH for the
   // active-low ones (e.g. X4 Pro's GPIO5, which powers the card while held LOW).
-  holdRailOff(b.sd.powerEnable, b.sd.powerActiveHigh ? LOW : HIGH);
-  holdRailOff(b.touch.powerEnable, b.touch.powerEnableActiveHigh ? LOW : HIGH);
+  holdPeripheralRailOff(b.sd.powerEnable, b.sd.powerActiveHigh ? LOW : HIGH);
+  holdPeripheralRailOff(b.touch.powerEnable, b.touch.powerEnableActiveHigh ? LOW : HIGH);
   // The mic enable also carries a polarity flag; OFF is the inactive level.
-  holdRailOff(b.mic.enable, b.mic.enableActiveHigh ? LOW : HIGH);
+  holdPeripheralRailOff(b.mic.enable, b.mic.enableActiveHigh ? LOW : HIGH);
+}
+
+void PowerManager::holdPowerRailsForTimerWake() {
+  for (const int8_t pin : {BoardConfig::ACTIVE.power.latch0, BoardConfig::ACTIVE.power.latch1}) {
+    // Same collision guard the release path uses: never drive a display or SDMMC
+    // bus pin as a latch on a stale/mismatched profile.
+    if (pin < 0 || BoardConfig::latchConflictsWithBus(pin)) continue;
+    holdRail(pin, HIGH);
+  }
 }
 
 void PowerManager::deepSleep() {
