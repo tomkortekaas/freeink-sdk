@@ -40,14 +40,25 @@ class PowerManager {
   // enables gpio_deep_sleep_hold_en(), which makes the holds persist). Without
   // this, boards with gated rails (e.g. Sticky: GT911 on TP_PWR_EN, SD on
   // SD_PWR_EN, EPD on EP_PWR_EN) leave those peripherals powered all through
-  // deep sleep — milliamps of standby drain. No-op on boards whose rails are
-  // PIN_UNASSIGNED (X4/X3). Call after the display driver's deep-sleep command
-  // and before deepSleep(); wake is a chip reset, so rails re-enable in the
-  // normal init path. Display RESET is held LOW when its rail is cut (avoids
-  // back-powering an unpowered controller) and HIGH when its rail remains on
-  // (keeps deep-sleep state stable). NOTE: cutting the touch rail forfeits
-  // touch-to-wake.
+  // deep sleep — milliamps of standby drain. Call after the display driver's
+  // deep-sleep command and before deepSleep(); wake is a chip reset, so rails
+  // re-enable in the normal init path. Display RESET is held LOW when its rail
+  // is cut (avoids back-powering an unpowered controller) and HIGH when its rail
+  // remains on (keeps deep-sleep state stable). A rail-enable pin that is also
+  // a power latch is skipped: on
+  // the Xteink X3/X4 the "SD enable" (GPIO13) is the battery MOSFET gate, so
+  // cutting it here would power the board off rather than gate a peripheral.
+  // Releasing a latch is the caller's decision — see holdPowerRailsForTimerWake().
+  // NOTE: cutting the touch rail forfeits touch-to-wake.
   static void powerDownRailsForSleep();
+
+  // Drive the active board's power-latch pins to their asserted (HIGH) level and
+  // hold them through deep sleep. A timer wake only happens if the board is still
+  // powered when the timer fires, so any sleep that arms one must call this: on a
+  // battery-latched board an unheld latch pin floats once the GPIOs are isolated,
+  // the latch node discharges, and the device switches off instead of sleeping.
+  // USB masks this entirely, because VBUS feeds the same latch node in parallel.
+  static void holdPowerRailsForTimerWake();
 
   // Isolate floating GPIOs to cut sleep current, then enter deep sleep. Does not
   // return — the chip resets on wake.

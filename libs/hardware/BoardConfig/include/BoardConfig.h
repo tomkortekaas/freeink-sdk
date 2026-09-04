@@ -912,13 +912,14 @@ constexpr BoardProfile XTEINK_X3 = {
     528,
     {8, 10, 21, 4, 5, 6, PIN_UNASSIGNED},
     XTEINK_DISPLAY_SPI_HZ,  // displaySpiHz: 10 MHz
-    // powerEnable=GPIO13 = the X3 SD-rail power switch (active-high; HIGH at boot
-    // powers the card, the sleep path drives it LOW). Confirmed by X3 factory-firmware
-    // RE: setup() does digitalWrite(13,HIGH); every deep-sleep does digitalWrite(13,LOW).
-    // Without declaring it, powerDownRailsForSleep() has no X3 SD enable to cut, so the
-    // card stays powered through sleep -> battery drain. Shares the display SPI bus
-    // (SCLK 8 / MOSI 10); MISO 7, CS 12. NOTE: X4 uses the same GPIO13 but keeps it as
-    // power.latch0 (driven by the consumer's sleep path), so it is left unchanged.
+    // powerEnable=GPIO13 = the same pin the X4 carries as power.latch0: the battery
+    // MOSFET gate, not an SD-only switch. The X4 schematic (sunwoods/Xteink-X4,
+    // readme-img/sch.jpg) shows IO13 feeding an R6/R4 divider through schottky D2;
+    // that divider gates Q7, which pulls the gate of Q1 (AO3401A P-FET) low and puts
+    // the cell on VIN. USB VBUS feeds the same divider node through D1, in parallel,
+    // so on USB the rail stays up whatever IO13 does. Declaring it here too keeps the
+    // SD rescue path (SDCardManager::begin) working; power.latch0 below is what makes
+    // holdPowerRails() assert it at boot and the sleep path own the power-off.
     {PIN_UNASSIGNED, 7, PIN_UNASSIGNED, 12, 13, false, 0},
     {0, 1, 2, 3, 4, 5, 3, false},
     0,
@@ -933,7 +934,12 @@ constexpr BoardProfile XTEINK_X3 = {
     NO_SDMMC,
     {20, 0, 400000, 0x55, 0},  // BQ27220 fuel gauge (0x55) on SDA20/SCL0; no charger IC
     NO_MIC,
-    {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658}};
+    {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658},
+    1.0f,
+    // Battery latch on GPIO13 — see the sd.powerEnable note above. Releasing it is a
+    // software power-off, so a sleep that arms a timer wake must keep it asserted or
+    // the device switches off instead of sleeping and the timer never fires.
+    {13, PIN_UNASSIGNED}};
 
 // --- Xteink X3 (UC8279d run) — ESP32-C3, UC8279d (792x528) -------------------
 // Newer X3 production units swap the UC8253 for a UC8279d ("d_B" silicon; the
@@ -965,7 +971,21 @@ constexpr BoardProfile XTEINK_X3_UC8279 = {
     NO_SDMMC,
     {20, 0, 400000, 0x55, 0},
     NO_MIC,
-    {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658}};
+    {20, 0, 400000, 0x68, 0, 0x6B, 0, RtcType::Ds3231, ImuType::Qmi8658},
+    1.0f,
+    {13, PIN_UNASSIGNED}};  // battery latch on GPIO13 — see XTEINK_X3
+
+// The X3's "SD enable" and its battery latch are one and the same pin, and both
+// roles have to stay declared: the latch so holdPowerRails() asserts it at boot
+// and the sleep path owns the power-off, the SD enable so SDCardManager's rail
+// rescue still runs. Splitting them silently reintroduces the failure where a
+// sleep releases the rail and the device switches off instead of sleeping.
+static_assert(XTEINK_X3.power.latch0 == XTEINK_X3.sd.powerEnable,
+              "X3: SD enable and battery latch must stay the same pin");
+static_assert(XTEINK_X3_UC8279.power.latch0 == XTEINK_X3_UC8279.sd.powerEnable,
+              "X3 (UC8279): SD enable and battery latch must stay the same pin");
+static_assert(XTEINK_X4.power.latch0 == XTEINK_X3.power.latch0,
+              "X3 and X4 share one board; the battery latch pin must match");
 
 // --- M5Stack PaperColor — ESP32-S3, ED2208 color panel, M5PM1 PMIC -----------
 constexpr BoardProfile M5STACK_PAPER_COLOR = {Board::M5StackPaperColor,
