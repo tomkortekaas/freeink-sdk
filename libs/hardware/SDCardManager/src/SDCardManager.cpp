@@ -238,6 +238,36 @@ FsBlockDeviceInterface* SDCardManager::detachFilesystemForRawAccess() { return n
 #endif  // USE_BLOCK_DEVICE_INTERFACE || HAS_SDIO_CLASS
 #endif  // FREEINK_SD_SDMMC
 
+void SDCardManager::shutdown() {
+  if (!initialized) return;
+
+#if FREEINK_SD_SDMMC
+  _vol.end();
+  if (_dev) _dev->end();
+
+  // sdmmc_host_deinit() leaves the matrix-routed lines in their last state.
+  // Float them so their pull-ups cannot back-feed a gated card during sleep.
+  const BoardConfig::SdmmcPins& pins = BoardConfig::ACTIVE.sdmmc;
+  for (const int8_t pin : {pins.clk, pins.cmd, pins.d0, pins.d1, pins.d2, pins.d3}) {
+    if (pin < 0) continue;
+    const auto gpio = static_cast<gpio_num_t>(pin);
+    gpio_set_direction(gpio, GPIO_MODE_INPUT);
+    gpio_pullup_dis(gpio);
+    gpio_pulldown_dis(gpio);
+  }
+#else
+  // X3 timer sleep keeps the board's battery latch asserted, so ending the
+  // SdFat session is required even though ordinary power-off cuts the rail.
+  sd.end();
+#endif
+
+  initialized = false;
+  cachedTotalBytes = 0;
+  cachedUsedBytes = 0;
+  cachedUsedBytesAt = 0;
+  cachedUsedBytesValid = false;
+}
+
 bool SDCardManager::ready() const {
   return initialized;
 }
