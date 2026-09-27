@@ -78,30 +78,6 @@ FsBlockDeviceInterface* SDCardManager::detachFilesystemForRawAccess() {
   return _dev;
 }
 
-void SDCardManager::shutdown() {
-  if (!initialized || !_dev) return;
-  // FsVolume::end() flushes SdFat's cached FAT/directory sectors; SDMMC block
-  // writes are synchronous, so the card is consistent once it returns.
-  _vol.end();
-  _dev->end();  // frees the card and runs sdmmc_host_deinit()
-  // sdmmc_host_deinit() leaves the bus pads in their last GPIO-matrix state:
-  // CLK/CMD/D0-D3 idle high and back-feed the card's VDD net through the bus
-  // pull-ups for the whole sleep (VDD measures 3.3 V with the enable gate
-  // driven off). Float the pads so the net can fall; the sleep path's
-  // esp_sleep_config_gpio_isolate() keeps them isolated.
-  const BoardConfig::SdmmcPins& p = BoardConfig::ACTIVE.sdmmc;
-  for (const int8_t pin : {p.clk, p.cmd, p.d0, p.d1, p.d2, p.d3}) {
-    if (pin < 0) continue;
-    const auto g = static_cast<gpio_num_t>(pin);
-    gpio_set_direction(g, GPIO_MODE_INPUT);
-    gpio_pullup_dis(g);
-    gpio_pulldown_dis(g);
-  }
-  initialized = false;
-  cachedTotalBytes = 0;
-  cachedUsedBytes = 0;
-  cachedUsedBytesValid = false;
-}
 #else
 SDCardManager::SDCardManager() : sd() {}
 
